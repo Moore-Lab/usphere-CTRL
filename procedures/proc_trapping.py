@@ -797,6 +797,16 @@ class TrappingPanel(QWidget):
         )
         raise_btn.clicked.connect(self._on_raise_trap)
         bi.addWidget(raise_btn)
+
+        lower_trap_btn = QPushButton("Lower Trap")
+        lower_trap_btn.setStyleSheet(
+            "QPushButton { font-weight: bold; padding: 5px 12px; "
+            "background-color: #7c3aed; color: white; border-radius: 3px; }"
+            "QPushButton:hover { background-color: #8b5cf6; }"
+        )
+        lower_trap_btn.setToolTip("Subtract the Raise amount from DC offset Z")
+        lower_trap_btn.clicked.connect(self._on_lower_trap)
+        bi.addWidget(lower_trap_btn)
         bi.addSpacing(20)
 
         bi.addWidget(QLabel("Avg Z:"))
@@ -1235,6 +1245,19 @@ class TrappingPanel(QWidget):
         except Exception:
             return
         new_val = min(current + self._raise_amount_spin.value(), 32767.0)
+        try:
+            self._fpga.write_register("DC offset Z", round(new_val))
+        except Exception:
+            pass
+
+    def _on_lower_trap(self) -> None:
+        if self._fpga is None or not self._fpga.is_connected:
+            return
+        try:
+            current = float(self._fpga.read_register("DC offset Z"))
+        except Exception:
+            return
+        new_val = max(current - self._raise_amount_spin.value(), -32768.0)
         try:
             self._fpga.write_register("DC offset Z", round(new_val))
         except Exception:
