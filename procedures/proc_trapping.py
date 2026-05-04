@@ -191,6 +191,7 @@ class TrappingPanel(QWidget):
         self._x_detected: bool = False
         self._y_detected: bool = False
         self._z_detected: bool = False
+        self._sphere_caught_active: bool = False
 
         # Detection state — trapping thresholds (after retraction; RMS above = sphere present)
         self._x_trapped: bool = False
@@ -1116,10 +1117,20 @@ class TrappingPanel(QWidget):
             self._z_locked = z_lock
             self._lock_z_led.setStyleSheet(_LED_ON if z_lock else _LED_OFF)
 
+        # sphere_caught rising-edge: fire once when both X and Y first detected
+        caught_now = x_det and y_det and not in_veto
+        if caught_now and not self._sphere_caught_active:
+            self._sphere_caught_active = True
+            if self._fpga is not None:
+                self._fpga.notify_sphere_caught(
+                    {"x_rms": x_rms, "y_rms": y_rms, "z_rms": z_rms, "ts": t}
+                )
+        elif not caught_now:
+            self._sphere_caught_active = False
+
         # Auto-catch: stop shaking when both X and Y detected outside veto
         if (self._auto_catch_check.isChecked()
-                and x_det and y_det
-                and not in_veto
+                and caught_now
                 and self._shaker_widget is not None):
             self._shaker_widget.request_stop()
 

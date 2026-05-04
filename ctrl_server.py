@@ -134,6 +134,11 @@ class CtrlServer(ModuleServer):
         # Wire FPGA monitor callback to update our cache
         self.fpga._on_registers_updated = self._on_registers_updated
 
+        # Publish sphere_caught events when TrappingPanel fires the rising edge
+        self.fpga.add_sphere_caught_callback(
+            lambda data: self.publish_event("sphere_caught", data)
+        )
+
     # ------------------------------------------------------------------
     # FPGA monitor callback
     # ------------------------------------------------------------------

@@ -150,6 +150,19 @@ class FPGAController:
         self._monitor_stop = threading.Event()
         self._monitor_thread: threading.Thread | None = None
         self._lock = threading.Lock()
+        self._sphere_caught_callbacks: list = []
+
+    def add_sphere_caught_callback(self, cb) -> None:
+        """Register a callable invoked when sphere catch is detected."""
+        self._sphere_caught_callbacks.append(cb)
+
+    def notify_sphere_caught(self, data: dict) -> None:
+        """Fire all sphere_caught callbacks (called from TrappingPanel)."""
+        for cb in self._sphere_caught_callbacks:
+            try:
+                cb(data)
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------
     # Public API
