@@ -18,6 +18,7 @@ hardware.
 
 from __future__ import annotations
 
+import collections
 import ctypes
 import datetime
 import json
@@ -152,6 +153,11 @@ class FPGAController:
         self._lock = threading.Lock()
         self._sphere_caught_callbacks: list = []
 
+        # Circular buffer: ~10 min of all register values at 200 ms poll rate.
+        # Each entry: {"ts": unix_time, register_name: value, ...}
+        self._monitor_buffer: collections.deque = collections.deque(maxlen=3000)
+        self._buf_lock = threading.Lock()
+
     def add_sphere_caught_callback(self, cb) -> None:
         """Register a callable invoked when sphere catch is detected."""
         self._sphere_caught_callbacks.append(cb)
@@ -163,6 +169,15 @@ class FPGAController:
                 cb(data)
             except Exception:
                 pass
+
+    def get_monitor_buffer(self) -> list[dict]:
+        """Return a copy of the circular monitor buffer.
+
+        Each entry is {"ts": unix_timestamp, register_name: value, ...}.
+        The buffer holds up to 3000 samples (~10 min at 200 ms poll rate).
+        """
+        with self._buf_lock:
+            return list(self._monitor_buffer)
 
     # ------------------------------------------------------------------
     # Public API
@@ -662,7 +677,10 @@ class FPGAController:
                 now = _time.monotonic()
                 if now - _last_full >= full_dt:
                     _last_full = now
+                    vals = self.read_all()
+                    with self._buf_lock:
+                        self._monitor_buffer.append({"ts": _time.time(), **vals})
                     if self._on_registers_updated:
-                        self._on_registers_updated(self.read_all())
+                        self._on_registers_updated(vals)
 
             self._monitor_stop.wait(plot_dt)

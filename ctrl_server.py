@@ -237,6 +237,9 @@ class CtrlServer(ModuleServer):
             errors, host_params = self.fpga.load_sphere(args["filepath"])
             return {"status": "ok", "data": {"errors": errors, "host_params": host_params}}
 
+        if cmd == "get_plot_buffer":
+            return {"status": "ok", "data": self.fpga.get_monitor_buffer()}
+
         if cmd == "save_snapshot":
             fp = self.fpga.save_snapshot(args["filepath"])
             return {"status": "ok", "data": {"filepath": str(fp)}}
