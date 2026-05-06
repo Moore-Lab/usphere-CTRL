@@ -1760,9 +1760,9 @@ class FPGAWidget(QWidget):
         rng_row = QHBoxLayout()
         rng_row.addWidget(QLabel("Range:"))
         for attr, label, defval in [
-            ("_gs_start", "start ", 0.5),
-            ("_gs_stop",  "stop ",  5.0),
-            ("_gs_step",  "step ",  0.5),
+            ("_gs_start",     "start ", 0.5),
+            ("_gs_stop_val",  "stop ",  5.0),
+            ("_gs_step",      "step ",  0.5),
         ]:
             sp = QDoubleSpinBox()
             sp.setRange(0.0, 1000.0)
@@ -1922,7 +1922,7 @@ class FPGAWidget(QWidget):
 
     def _gs_range_to_list(self):
         start = self._gs_start.value()
-        stop  = self._gs_stop.value()
+        stop  = self._gs_stop_val.value()
         step  = self._gs_step.value()
         if step <= 0 or start >= stop:
             self._gs_status.setText("Invalid range (need start < stop, step > 0)")
@@ -3730,43 +3730,70 @@ class FPGAWidget(QWidget):
     def _on_tic_poll_error(self, msg: str) -> None:
         self._append_status(f"Edwards TIC poll error: {msg}")
 
-    def _on_tic_start_pump(self) -> None:
+    def _tic_send_pump_cmd(self, action: str) -> None:
+        """
+        Send a pump start / stop / set-speed command with auto-poll paused.
+
+        Stops the poll timer before sending so the serial port is idle during
+        the write.  The QThread also sleeps 1 s to let any in-progress poll
+        cycle finish before trying to acquire the serial lock.
+        """
         if self._tic_ctrl is None:
             return
+
+        was_polling = self._tic_timer.isActive()
+        self._tic_timer.stop()
+
         class _W(QThread):
             done = pyqtSignal(bool, str)
-            def __init__(self, ctrl): super().__init__(); self._c = ctrl
+            def __init__(self, ctrl, act): super().__init__(); self._c = ctrl; self._act = act
             def run(self):
+                import time as _t
+                _t.sleep(1.0)   # let any in-progress poll cycle finish
                 try:
-                    ok = self._c.start_pump()
-                    self.done.emit(ok, "Pump started" if ok else "Start failed")
+                    if self._act == "start":
+                        ok = self._c.start_pump()
+                        label = "Pump started" if ok else "Start failed"
+                    elif self._act == "stop":
+                        ok = self._c.stop_pump()
+                        label = "Pump stopped" if ok else "Stop failed"
+                    else:
+                        ok = False
+                        label = f"unknown action {self._act!r}"
+                    self.done.emit(ok, label)
                 except Exception as exc:
-                    self.done.emit(False, f"start_pump error: {exc}")
-        w = _W(self._tic_ctrl)
-        w.done.connect(lambda ok, msg: self._append_status(f"TIC: {msg}"))
-        w.done.connect(lambda *_: self._on_tic_poll())
+                    self.done.emit(False, f"{self._act}_pump error: {exc}")
+
+        w = _W(self._tic_ctrl, action)
+
+        def _cmd_done(ok, msg):
+            self._append_status(f"TIC: {msg}")
+            if ok:
+                if action == "start":
+                    self._tic_tel_status.setText("Starting…")
+                    self._tic_tel_status.setStyleSheet(
+                        "background:#fef9c3; border-color:#fde047; color:#713f12; "
+                        "border: 1px solid; border-radius: 3px; padding: 2px 6px;")
+                elif action == "stop":
+                    self._tic_tel_status.setText("Stopping…")
+                    self._tic_tel_status.setStyleSheet(
+                        "background:#fef3c7; border-color:#f59e0b; color:#92400e; "
+                        "border: 1px solid; border-radius: 3px; padding: 2px 6px;")
+            # Restart timer, then do an immediate poll to confirm state
+            if was_polling and self._tic_autopoll_cb.isChecked():
+                self._tic_timer.start(self._tic_interval_spin.value())
+            self._on_tic_poll()
+
+        w.done.connect(_cmd_done)
         self._tic_cmd_workers.append(w)
         w.finished.connect(lambda: self._tic_cmd_workers.remove(w) if w in self._tic_cmd_workers else None)
         w.start()
 
+    def _on_tic_start_pump(self) -> None:
+        self._tic_send_pump_cmd("start")
+
     def _on_tic_stop_pump(self) -> None:
-        if self._tic_ctrl is None:
-            return
-        class _W(QThread):
-            done = pyqtSignal(bool, str)
-            def __init__(self, ctrl): super().__init__(); self._c = ctrl
-            def run(self):
-                try:
-                    ok = self._c.stop_pump()
-                    self.done.emit(ok, "Pump stopped" if ok else "Stop failed")
-                except Exception as exc:
-                    self.done.emit(False, f"stop_pump error: {exc}")
-        w = _W(self._tic_ctrl)
-        w.done.connect(lambda ok, msg: self._append_status(f"TIC: {msg}"))
-        w.done.connect(lambda *_: self._on_tic_poll())
-        self._tic_cmd_workers.append(w)
-        w.finished.connect(lambda: self._tic_cmd_workers.remove(w) if w in self._tic_cmd_workers else None)
-        w.start()
+        self._tic_send_pump_cmd("stop")
 
     def _on_tic_set_speed(self) -> None:
         if self._tic_ctrl is None:
