@@ -197,10 +197,12 @@ def _apply_params(ctrl: KCubeController, config: dict) -> None:
 def read(config: dict) -> dict:
     """Connect, read position and status flags, disconnect."""
     ctrl = _make_ctrl(config)
-    if not ctrl.connect():
+    try:
+        ctrl.connect()
+    except Exception as exc:
         raise ConnectionError(
-            f"Could not connect to dropper stage S/N '{config.get('serial_number')}'."
-        )
+            f"Could not connect to dropper stage S/N '{config.get('serial_number')}': {exc}"
+        ) from exc
     try:
         s = ctrl.get_status()
         return {
@@ -269,10 +271,12 @@ def command(config: dict, **kwargs) -> dict:
     except RuntimeError as exc:
         return {"ok": False, "message": str(exc), "position_mm": 0.0}
 
-    if not ctrl.connect():
+    try:
+        ctrl.connect()
+    except Exception as exc:
         return {
             "ok": False,
-            "message": f"Could not connect to stage S/N '{config.get('serial_number')}'.",
+            "message": f"Could not connect to stage S/N '{config.get('serial_number')}': {exc}",
             "position_mm": 0.0,
         }
 
