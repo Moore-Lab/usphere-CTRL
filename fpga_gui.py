@@ -1146,17 +1146,27 @@ class FPGAWidget(QWidget):
         filt_grp = QGroupBox("Filter Parameters (Hz)")
         fg = QGridLayout()
         r = 0
-        r = self._add_host(fg, r, f"hp freq {a}")
-        r = self._add_host(fg, r, f"lp freq {a}")
-        r = self._add_host(fg, r, f"LP FF {a}")
-        r = self._add_host(fg, r, f"hp freq {a} before")
-        r = self._add_host(fg, r, f"lp freq {a} before")
+        r = self._add_host(fg, r, f"hp freq {a}",
+            on_set=lambda _, ax=a: self._set_filter(ax, [f"HP Coeff {ax}"]))
+        r = self._add_host(fg, r, f"lp freq {a}",
+            on_set=lambda _, ax=a: self._set_filter(ax, [f"LP Coeff {ax}"]))
+        r = self._add_host(fg, r, f"LP FF {a}",
+            on_set=lambda _, ax=a: self._set_filter(ax, [f"final filter coeff {ax}"]))
+        r = self._add_host(fg, r, f"hp freq {a} before",
+            on_set=lambda _, ax=a: self._set_filter(ax, [f"HP Coeff {ax} before"]))
+        r = self._add_host(fg, r, f"lp freq {a} before",
+            on_set=lambda _, ax=a: self._set_filter(ax, [f"LP Coeff {ax} before"]))
         if a == "Z":
-            r = self._add_host(fg, r, "LP FF Z before")
-        r = self._add_host(fg, r, f"hp freq band{a}")
-        r = self._add_host(fg, r, f"lp freq band{a}")
-        r = self._add_host(fg, r, f"hp freq {a} band before")
-        r = self._add_host(fg, r, f"lp freq {a} band before")
+            r = self._add_host(fg, r, "LP FF Z before",
+                on_set=lambda _, ax=a: self._set_filter(ax, ["final filter coeff Z before"]))
+        r = self._add_host(fg, r, f"hp freq band{a}",
+            on_set=lambda _, ax=a: self._set_filter(ax, [f"HP Coeff band {ax}"]))
+        r = self._add_host(fg, r, f"lp freq band{a}",
+            on_set=lambda _, ax=a: self._set_filter(ax, [f"LP Coeff band {ax}"]))
+        r = self._add_host(fg, r, f"hp freq {a} band before",
+            on_set=lambda _, ax=a: self._set_filter(ax, [f"HP coeff band {ax} before"]))
+        r = self._add_host(fg, r, f"lp freq {a} band before",
+            on_set=lambda _, ax=a: self._set_filter(ax, [f"LP Coeff band {ax} before"]))
         filt_grp.setLayout(fg)
         layout.addWidget(filt_grp)
 
@@ -1166,7 +1176,9 @@ class FPGAWidget(QWidget):
         r = 0
         for i in range(1, 5):
             r = self._add_host(ng, r, f"notch freq {i} {al}")
-            r = self._add_host(ng, r, f"notch Q {i} {al}")
+            r = self._add_host(ng, r, f"notch Q {i} {al}",
+                on_set=lambda _, ax=a, n=i: self._set_filter(
+                    ax, [f"Notch coeff {ax.lower()} {n}"]))
         notch_grp.setLayout(ng)
         layout.addWidget(notch_grp)
 
@@ -2355,8 +2367,13 @@ class FPGAWidget(QWidget):
             grid.addWidget(live_lbl, row, 3)
         return row + 1
 
-    def _add_host(self, grid: QGridLayout, row: int, name: str) -> int:
-        """Add one host-param row to *grid*. Returns next row index."""
+    def _add_host(self, grid: QGridLayout, row: int, name: str,
+                  on_set=None) -> int:
+        """Add one host-param row to *grid*. Returns next row index.
+
+        on_set: optional callable — if given, a 'Set' button is added in col 2
+                that calls on_set() when clicked.
+        """
         hp = HOST_PARAM_MAP.get(name)
         if hp is None:
             return row
@@ -2366,6 +2383,11 @@ class FPGAWidget(QWidget):
         edit.setToolTip(hp.description)
         self._host_edits[name] = edit
         grid.addWidget(edit, row, 1)
+        if on_set is not None:
+            btn = QPushButton("Set")
+            btn.setFixedWidth(40)
+            btn.clicked.connect(on_set)
+            grid.addWidget(btn, row, 2)
         return row + 1
 
     # ==================================================================
@@ -2602,6 +2624,20 @@ class FPGAWidget(QWidget):
     # ==================================================================
     # Change pars
     # ==================================================================
+
+    def _set_filter(self, axis: str, coeff_keys: list) -> None:
+        """Compute coefficients for *axis* and write only the registers in *coeff_keys*."""
+        if not self._ctrl.is_connected:
+            self._append_status("Not connected.")
+            return
+        from fpga.registers import compute_coefficients
+        host = self._gather_host_params()
+        all_coeffs = compute_coefficients(axis, host)
+        to_write = {k: all_coeffs[k] for k in coeff_keys if k in all_coeffs}
+        errors = self._ctrl.write_many(to_write)
+        if errors:
+            self._append_status(f"Set filter ({axis}) errors: {errors}")
+        self._on_read_all()
 
     def _on_change_pars(self, axis: str) -> None:
         if not self._ctrl.is_connected:

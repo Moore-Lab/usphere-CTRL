@@ -277,10 +277,15 @@ def readable_registers() -> list[RegisterDef]:
 
 
 # ---------------------------------------------------------------------------
-# FPGA sample rate
+# FPGA sample rate and FXP scaling
 # ---------------------------------------------------------------------------
 
 FPGA_SAMPLE_RATE = 100_000  # Hz — derived from Count(uSec) = 10
+
+# Coefficient registers are I32 in the bitfile with Q30 fixed-point format:
+# physical_value = raw_integer / FXP_SCALE.  All _*_array helpers below
+# return lists of int (raw I32 values) that nifpga can accept directly.
+FXP_SCALE = 2 ** 30
 
 
 # ---------------------------------------------------------------------------
@@ -439,38 +444,41 @@ def hz_to_periods_per_tick(freq_hz: float,
 
 
 def _hp_array(alpha: float) -> list:
-    """2-element HP IIR coefficient array: [pole, 0.0].
+    """2-element HP IIR coefficient array as Q30 integers: [pole, 0].
 
     Element layout assumed by the LabVIEW FPGA HP filter block:
       [a1 = pole coefficient,  element-1 (usage TBD by LabVIEW impl)]
     Verify against the LabVIEW VI if filter behaviour is unexpected.
     """
-    return [alpha, 0.0]
+    s = FXP_SCALE
+    return [int(round(alpha * s)), 0]
 
 
 def _lp_array(alpha: float) -> list:
-    """2-element LP IIR coefficient array: [pole, gain].
+    """2-element LP IIR coefficient array as Q30 integers: [pole, gain].
 
     Standard first-order LP: y[n] = alpha*y[n-1] + (1-alpha)*x[n]
     Element layout: [a1=alpha, b0=1-alpha].
     Verify against the LabVIEW VI if filter behaviour is unexpected.
     """
-    return [alpha, 1.0 - alpha]
+    s = FXP_SCALE
+    return [int(round(alpha * s)), int(round((1.0 - alpha) * s))]
 
 
 def _band6_array(alpha: float) -> list:
-    """6-element bandpass / final-filter coefficient array.
+    """6-element bandpass / final-filter coefficient array as Q30 integers.
 
     The FPGA band filter is assumed to store the primary IIR coefficient in
     element 0 with the remaining 5 elements zero-padded.  Verify the full
     6-element layout against the LabVIEW VI if behaviour is unexpected.
     """
-    return [alpha, 0.0, 0.0, 0.0, 0.0, 0.0]
+    s = FXP_SCALE
+    return [int(round(alpha * s)), 0, 0, 0, 0, 0]
 
 
 def _notch_array(freq_hz: float, q: float,
                  sample_rate: float = FPGA_SAMPLE_RATE) -> list:
-    """3-element notch IIR coefficient array.
+    """3-element notch IIR coefficient array as Q30 integers.
 
     Standard biquad notch:
       H(z) = (1 - 2*cos(w0)*z^-1 + z^-2) / (1 - 2*r*cos(w0)*z^-1 + r^2*z^-2)
@@ -481,11 +489,14 @@ def _notch_array(freq_hz: float, q: float,
     Verify the exact sign conventions against the LabVIEW VI.
     """
     if freq_hz <= 0 or q <= 0:
-        return [0.0, 0.0, 0.0]
+        return [0, 0, 0]
+    s     = FXP_SCALE
     bw    = freq_hz / q
     r     = max(0.0, 1.0 - math.pi * bw / sample_rate)
     cos_w = math.cos(2.0 * math.pi * freq_hz / sample_rate)
-    return [r ** 2, 2.0 * r * cos_w, 2.0 * cos_w]
+    return [int(round(r ** 2 * s)),
+            int(round(2.0 * r * cos_w * s)),
+            int(round(2.0 * cos_w * s))]
 
 
 def compute_coefficients(axis: str, host_params: dict[str, float],
@@ -501,7 +512,7 @@ def compute_coefficients(axis: str, host_params: dict[str, float],
     Returns
     -------
     dict mapping FPGA register names to values.
-    Scalar registers → float.  Array registers → list[float].
+    Array registers → list[int] (Q30 FXP raw values ready for nifpga).
     """
     a  = axis.upper()
     al = axis.lower()

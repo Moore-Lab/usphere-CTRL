@@ -638,12 +638,14 @@ class FPGAController:
             if reg.is_bool:
                 nifpga_reg.write(bool(value))
             elif reg.n_elements > 1:
-                # Array FXP register — nifpga requires a list of the exact length
+                # Array FXP register — nifpga requires a list of ints (Q30 raw values).
+                # compute_coefficients already returns scaled ints; scalars from
+                # session_state.json (e.g. 832879534.0) are cast here as well.
                 if isinstance(value, (list, tuple)):
                     arr = list(value)
                 else:
-                    arr = [float(value)] + [0.0] * (reg.n_elements - 1)
-                nifpga_reg.write(arr)
+                    arr = [value] + [0] * (reg.n_elements - 1)
+                nifpga_reg.write([int(round(x)) for x in arr])
             elif reg.is_integer:
                 nifpga_reg.write(int(round(float(value))))
             else:
