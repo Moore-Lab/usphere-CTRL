@@ -1605,6 +1605,19 @@ class TrappingPanel(QWidget):
                         "Dropper exhausted (reached 60 V) — load new slide")
                     self._update_token_display()
                     return
+                else:
+                    # Shaker completed all its steps without catching — stop the
+                    # macro rather than letting the timeout loop trigger a full
+                    # restart.  (Typical case: user clicked ↺ Resume, the
+                    # remaining steps finished, no sphere caught this round.)
+                    self._tokens["shaker"] = "stopped"
+                    self._enter_state(_ST_IDLE)
+                    self._macro_timer.stop()
+                    self._macro_status_lbl.setText(
+                        "Shaker sequence complete — no catch. "
+                        "Press Start or ↺ Resume to try again.")
+                    self._update_token_display()
+                    return
 
             in_veto = self._shaking or now < self._veto_until
             if not in_veto and self._catch_cond.check(self):
