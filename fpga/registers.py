@@ -446,6 +446,34 @@ def hz_to_periods_per_tick(freq_hz: float,
     return sample_rate / freq_hz
 
 
+def coeff_to_hz(name: str, elem0_raw: float) -> str | None:
+    """Convert element-0 of a filter coefficient register to a frequency string.
+
+    Returns a human-readable string like "~400 Hz" for HP/LP/band/final filter
+    registers, or None if the register is not a filter array or conversion fails
+    (e.g. notch registers, whose center frequency cannot be recovered from
+    element 0 alone).
+    """
+    reg = REGISTER_MAP.get(name)
+    if reg is None or reg.n_elements < 2:
+        return None
+    # Notch elem0 = r^2 — center frequency not recoverable from elem0 alone
+    low = name.lower()
+    if "notch" in low:
+        return None
+    is_before = "before" in low
+    is_final  = "final"  in low
+    sr = FPGA_FILTER_RATE_BEFORE if (is_before or is_final) else FPGA_FILTER_RATE_MAIN
+    alpha = elem0_raw / FXP_SCALE
+    if alpha <= 0.0 or alpha >= 1.0:
+        return None
+    try:
+        freq = -math.log(alpha) * sr / (2.0 * math.pi)
+        return f"~{freq:.0f} Hz"
+    except Exception:
+        return None
+
+
 def _hp_array(alpha: float) -> list:
     """2-element HP IIR coefficient array as Q30 integers: [pole, 0].
 

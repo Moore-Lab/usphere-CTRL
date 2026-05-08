@@ -63,6 +63,7 @@ from fpga.registers import (
     REGISTER_MAP,
     REGISTERS,
     RegisterDef,
+    coeff_to_hz,
     host_params_by_category,
     names_by_category,
     writable_registers,
@@ -2608,7 +2609,8 @@ class FPGAWidget(QWidget):
                 # Always refresh the grey live-value label
                 live_lbl = self._reg_live_labels.get(name)
                 if live_lbl is not None:
-                    live_lbl.setText(_fmt(val, is_int))
+                    hz_str = coeff_to_hz(name, val)
+                    live_lbl.setText(hz_str if hz_str is not None else _fmt(val, is_int))
                 # Only push into the editable field on startup / explicit read
                 if initial:
                     edit.setText(_fmt(val, is_int))
