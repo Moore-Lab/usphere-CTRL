@@ -1136,7 +1136,7 @@ class FPGAWidget(QWidget):
         if a == "Z":
             r = self._add_reg(mg, r, "accum reset z1")
             r = self._add_reg(mg, r, "accum out z1")
-            r = self._add_reg(mg, r, "accurrm reset z2")
+            r = self._add_reg(mg, r, "accurm reset z2")
             r = self._add_reg(mg, r, "accum out z2")
             r = self._add_reg(mg, r, "pz?")
         misc_grp.setLayout(mg)
@@ -2156,7 +2156,6 @@ class FPGAWidget(QWidget):
         r = self._add_reg(eg, r, "EOM_seed")
         r = self._add_reg(eg, r, "Amplitude_sine_EOM")
         r = self._add_reg(eg, r, "eom sine frequency (periods/tick)")
-        r = self._add_reg(eg, r, "EOM_amplitude_out")
         r = self._add_reg(eg, r, "EOM reset")
         r = self._add_host(eg, r, "Frequency_sine_EOM (Hz)")
         eom_grp.setLayout(eg)
@@ -2179,12 +2178,6 @@ class FPGAWidget(QWidget):
         ao_grp = QGroupBox("AO Channels / Rotation Control")
         ag = QGridLayout()
         r = 0
-        # Rotation booleans
-        r = self._add_reg(ag, r, "Reset voltage")
-        r = self._add_reg(ag, r, "If revert AO4 and AO5")
-        r = self._add_reg(ag, r, "If scan frequency (AO6 and AO7)?")
-        ag.addWidget(QLabel(""), r, 0)  # spacer
-        r += 1
         for ch in (4, 5, 6, 7):
             ag.addWidget(QLabel(f"--- AO{ch} ---"), r, 0, 1, 3)
             r += 1
@@ -2512,7 +2505,6 @@ class FPGAWidget(QWidget):
         self._disconnect_btn.setEnabled(True)
         self._bitfile_edit.setReadOnly(True)
         self._resource_edit.setReadOnly(True)
-        self._restore_registers_from_state()
         self._on_read_all()
 
     def _on_disconnected(self) -> None:
@@ -2559,10 +2551,13 @@ class FPGAWidget(QWidget):
         if not self._ctrl.is_connected:
             self._append_status("Not connected.")
             return
-        values = self._ctrl.read_all()
+        values, failures = self._ctrl.read_all()
         self._update_reg_edits(values, initial=True)
         self._sync_count_usec(values)
-        self._append_status(f"Read {len(values)} registers")
+        msg = f"Read {len(values)} registers"
+        if failures:
+            msg += f"  ({len(failures)} failed: {', '.join(failures)})"
+        self._append_status(msg)
 
     def _sync_count_usec(self, values: dict) -> None:
         """Update Sa/s label and sample rate from Count(uSec) if it changed."""

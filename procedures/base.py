@@ -225,7 +225,7 @@ class LiveFPGAFacade(FPGAFacade):
     def read_registers(self, names: list[str]) -> dict[str, float]:
         return self._ctrl.read_registers(names)
 
-    def read_all(self) -> dict[str, float]:
+    def read_all(self) -> tuple[dict[str, float], list[str]]:
         return self._ctrl.read_all()
 
     def write_many(self, values: dict[str, float]) -> dict[str, str]:

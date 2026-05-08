@@ -252,10 +252,25 @@ class FPGAController:
 
         _append_log("write", {"register": name, "value": value})
 
-    def read_all(self) -> dict[str, float]:
-        """Read every register. Returns dict[name, value]."""
+    def read_all(self) -> tuple[dict[str, float], list[str]]:
+        """Read readable registers.
+
+        Returns
+        -------
+        (values, failures)
+            values   : dict[name, float] — successfully read registers
+            failures : list[str]         — names that raised an exception
+        """
+        readable = [r.name for r in readable_registers()]
+        values: dict[str, float] = {}
+        failures: list[str] = []
         with self._lock:
-            return {name: self._read_one(name) for name in ALL_NAMES}
+            for name in readable:
+                try:
+                    values[name] = self._read_one_strict(name)
+                except Exception:
+                    failures.append(name)
+        return values, failures
 
     def read_registers(self, names: list[str]) -> dict[str, float]:
         """Read a subset of registers by name."""
@@ -288,7 +303,7 @@ class FPGAController:
 
     def snapshot(self) -> dict:
         """Return all register values plus connection metadata."""
-        vals = self.read_all()
+        vals, _ = self.read_all()
         return {
             "timestamp": datetime.datetime.now().isoformat(),
             "config": self.config.to_dict(),
@@ -608,23 +623,23 @@ class FPGAController:
     def _log(self, msg: str) -> None:
         self._on_status(msg)
 
-    def _read_one(self, name: str) -> float:
-        """Read one register (caller holds _lock).
-
-        For array registers nifpga returns a list; we return the first element
-        so the existing scalar GUI display path keeps working.
-        """
+    def _read_one_strict(self, name: str) -> float:
+        """Read one register; raises on any exception (caller holds _lock)."""
         if self._session is not None:
-            try:
-                val = self._session.registers[name].read()
-                if isinstance(val, (list, tuple)):
-                    return float(val[0]) if val else 0.0
-                return 1.0 if val is True else (0.0 if val is False else float(val))
-            except Exception:
-                return 0.0
+            val = self._session.registers[name].read()
+            if isinstance(val, (list, tuple)):
+                return float(val[0]) if val else 0.0
+            return 1.0 if val is True else (0.0 if val is False else float(val))
         else:
             sim = self._sim_regs.get(name, 0.0)
             return float(sim[0]) if isinstance(sim, list) else sim
+
+    def _read_one(self, name: str) -> float:
+        """Read one register, returning 0.0 on any error (caller holds _lock)."""
+        try:
+            return self._read_one_strict(name)
+        except Exception:
+            return 0.0
 
     def _write_one(self, name: str, value, reg: RegisterDef) -> None:
         """Write one register (caller holds _lock).
@@ -679,7 +694,7 @@ class FPGAController:
                 now = _time.monotonic()
                 if now - _last_full >= full_dt:
                     _last_full = now
-                    vals = self.read_all()
+                    vals, _ = self.read_all()
                     with self._buf_lock:
                         self._monitor_buffer.append({"ts": _time.time(), **vals})
                     if self._on_registers_updated:
