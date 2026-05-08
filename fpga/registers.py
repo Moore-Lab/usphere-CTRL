@@ -276,7 +276,14 @@ def readable_registers() -> list[RegisterDef]:
 # FPGA sample rate and FXP scaling
 # ---------------------------------------------------------------------------
 
-FPGA_SAMPLE_RATE = 100_000  # Hz — derived from Count(uSec) = 10
+FPGA_SAMPLE_RATE = 100_000   # Hz — FPGA loop rate (Count(uSec) = 10)
+
+# Butterworth filter VI sample rates as configured in the LabVIEW host VI.
+# Main HP/LP and band filters use 50k; before-chamber, notch, and final
+# filters use 100k.  These are baked into each VI instance at compile time
+# and do not depend on the runtime Count(uSec) value.
+FPGA_FILTER_RATE_MAIN   = 50_000   # Hz — main HP/LP and band filters
+FPGA_FILTER_RATE_BEFORE = 100_000  # Hz — before-chamber, notch, final filters
 
 # Coefficient registers are I32 in the bitfile with Q30 fixed-point format:
 # physical_value = raw_integer / FXP_SCALE.  All _*_array helpers below
@@ -495,15 +502,13 @@ def _notch_array(freq_hz: float, q: float,
             int(round(2.0 * cos_w * s))]
 
 
-def compute_coefficients(axis: str, host_params: dict[str, float],
-                         sample_rate: float = FPGA_SAMPLE_RATE) -> dict:
+def compute_coefficients(axis: str, host_params: dict[str, float]) -> dict:
     """Compute FPGA filter-coefficient registers from host parameters.
 
     Parameters
     ----------
     axis : "X", "Y", or "Z"
     host_params : dict mapping host-param names to their current values
-    sample_rate : FPGA loop rate in Hz
 
     Returns
     -------
@@ -514,45 +519,51 @@ def compute_coefficients(axis: str, host_params: dict[str, float],
     al = axis.lower()
     result: dict = {}
 
-    # HP / LP filter coefficients (2-element array registers)
+    sr_main   = FPGA_FILTER_RATE_MAIN    # 50k: main HP/LP and band filters
+    sr_before = FPGA_FILTER_RATE_BEFORE  # 100k: before-chamber, notch, final
+
+    # Main HP / LP (50k)
     result[f"HP Coeff {a}"] = _hp_array(
-        freq_to_hp_coeff(host_params.get(f"hp freq {a}", 0), sample_rate))
+        freq_to_hp_coeff(host_params.get(f"hp freq {a}", 0), sr_main))
     result[f"LP Coeff {a}"] = _lp_array(
-        freq_to_lp_coeff(host_params.get(f"lp freq {a}", 0), sample_rate))
+        freq_to_lp_coeff(host_params.get(f"lp freq {a}", 0), sr_main))
+
+    # Before-chamber HP / LP (100k)
     result[f"HP Coeff {a} before"] = _hp_array(
-        freq_to_hp_coeff(host_params.get(f"hp freq {a} before", 0), sample_rate))
+        freq_to_hp_coeff(host_params.get(f"hp freq {a} before", 0), sr_before))
     result[f"LP Coeff {a} before"] = _lp_array(
-        freq_to_lp_coeff(host_params.get(f"lp freq {a} before", 0), sample_rate))
+        freq_to_lp_coeff(host_params.get(f"lp freq {a} before", 0), sr_before))
 
-    # Band-pass filter coefficients (6-element array registers)
+    # Band-pass filters — main (50k)
     result[f"HP Coeff band {a}"] = _band6_array(
-        freq_to_hp_coeff(host_params.get(f"hp freq band{a}", 0), sample_rate))
+        freq_to_hp_coeff(host_params.get(f"hp freq band{a}", 0), sr_main))
     result[f"LP Coeff band {a}"] = _band6_array(
-        freq_to_lp_coeff(host_params.get(f"lp freq band{a}", 0), sample_rate))
+        freq_to_lp_coeff(host_params.get(f"lp freq band{a}", 0), sr_main))
 
+    # Band-pass before (100k)
     hp_band_before = host_params.get(
         f"hp freq {a} band before",
         host_params.get(f"hp freq band {a} before", 0))
     result[f"HP coeff band {a} before"] = _band6_array(
-        freq_to_hp_coeff(hp_band_before, sample_rate))
+        freq_to_hp_coeff(hp_band_before, sr_before))
 
     lp_band_before = host_params.get(
         f"lp freq {a} band before",
         host_params.get(f"lp freq band {a} before", 0))
     result[f"LP Coeff band {a} before"] = _band6_array(
-        freq_to_lp_coeff(lp_band_before, sample_rate))
+        freq_to_lp_coeff(lp_band_before, sr_before))
 
-    # Final LP filter (6-element array register)
+    # Final LP filter (100k)
     result[f"final filter coeff {a}"] = _band6_array(
-        freq_to_lp_coeff(host_params.get(f"LP FF {a}", 0), sample_rate))
+        freq_to_lp_coeff(host_params.get(f"LP FF {a}", 0), sr_before))
     if a == "Z":
         result["final filter coeff Z before"] = _band6_array(
-            freq_to_lp_coeff(host_params.get("LP FF Z before", 0), sample_rate))
+            freq_to_lp_coeff(host_params.get("LP FF Z before", 0), sr_before))
 
-    # Notch filters — 4 per axis (3-element array registers)
+    # Notch filters — 4 per axis (100k)
     for i in range(1, 5):
         f0 = host_params.get(f"notch freq {i} {al}", 0)
         q  = host_params.get(f"notch Q {i} {al}", 1)
-        result[f"Notch coeff {al} {i}"] = _notch_array(f0, q, sample_rate)
+        result[f"Notch coeff {al} {i}"] = _notch_array(f0, q, sr_before)
 
     return result
