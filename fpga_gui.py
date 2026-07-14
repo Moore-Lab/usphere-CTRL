@@ -831,6 +831,7 @@ class FPGAWidget(QWidget):
         self._reg_edits: dict[str, QLineEdit] = {}       # FPGA register widgets
         self._reg_live_labels: dict[str, QLabel] = {}  # live-value display (writable regs only)
         self._host_edits: dict[str, QLineEdit] = {}     # host-param widgets
+        self._host_coeff_labels: dict[str, QLabel] = {}  # {coeff_reg_name: gray label}
         self._host_values: dict[str, float] = dict(HOST_PARAM_DEFAULTS)
         self._bead_fb_combos: dict[str, QComboBox] = {}  # per-axis bead fb selector
         self._boost_multiplier: float = 10.0              # boost gain factor
@@ -1148,26 +1149,36 @@ class FPGAWidget(QWidget):
         fg = QGridLayout()
         r = 0
         r = self._add_host(fg, r, f"hp freq {a}",
-            on_set=lambda _, ax=a: self._set_filter(ax, [f"HP Coeff {ax}"]))
+            on_set=lambda _, ax=a: self._set_filter(ax, [f"HP Coeff {ax}"]),
+            readback_reg=f"HP Coeff {a}")
         r = self._add_host(fg, r, f"lp freq {a}",
-            on_set=lambda _, ax=a: self._set_filter(ax, [f"LP Coeff {ax}"]))
+            on_set=lambda _, ax=a: self._set_filter(ax, [f"LP Coeff {ax}"]),
+            readback_reg=f"LP Coeff {a}")
         r = self._add_host(fg, r, f"LP FF {a}",
-            on_set=lambda _, ax=a: self._set_filter(ax, [f"final filter coeff {ax}"]))
+            on_set=lambda _, ax=a: self._set_filter(ax, [f"final filter coeff {ax}"]),
+            readback_reg=f"final filter coeff {a}")
         r = self._add_host(fg, r, f"hp freq {a} before",
-            on_set=lambda _, ax=a: self._set_filter(ax, [f"HP Coeff {ax} before"]))
+            on_set=lambda _, ax=a: self._set_filter(ax, [f"HP Coeff {ax} before"]),
+            readback_reg=f"HP Coeff {a} before")
         r = self._add_host(fg, r, f"lp freq {a} before",
-            on_set=lambda _, ax=a: self._set_filter(ax, [f"LP Coeff {ax} before"]))
+            on_set=lambda _, ax=a: self._set_filter(ax, [f"LP Coeff {ax} before"]),
+            readback_reg=f"LP Coeff {a} before")
         if a == "Z":
             r = self._add_host(fg, r, "LP FF Z before",
-                on_set=lambda _, ax=a: self._set_filter(ax, ["final filter coeff Z before"]))
+                on_set=lambda _, ax=a: self._set_filter(ax, ["final filter coeff Z before"]),
+                readback_reg="final filter coeff Z before")
         r = self._add_host(fg, r, f"hp freq band{a}",
-            on_set=lambda _, ax=a: self._set_filter(ax, [f"HP Coeff band {ax}"]))
+            on_set=lambda _, ax=a: self._set_filter(ax, [f"HP Coeff band {ax}"]),
+            readback_reg=f"HP Coeff band {a}")
         r = self._add_host(fg, r, f"lp freq band{a}",
-            on_set=lambda _, ax=a: self._set_filter(ax, [f"LP Coeff band {ax}"]))
+            on_set=lambda _, ax=a: self._set_filter(ax, [f"LP Coeff band {ax}"]),
+            readback_reg=f"LP Coeff band {a}")
         r = self._add_host(fg, r, f"hp freq {a} band before",
-            on_set=lambda _, ax=a: self._set_filter(ax, [f"HP coeff band {ax} before"]))
+            on_set=lambda _, ax=a: self._set_filter(ax, [f"HP coeff band {ax} before"]),
+            readback_reg=f"HP coeff band {a} before")
         r = self._add_host(fg, r, f"lp freq {a} band before",
-            on_set=lambda _, ax=a: self._set_filter(ax, [f"LP Coeff band {ax} before"]))
+            on_set=lambda _, ax=a: self._set_filter(ax, [f"LP Coeff band {ax} before"]),
+            readback_reg=f"LP Coeff band {a} before")
         filt_grp.setLayout(fg)
         layout.addWidget(filt_grp)
 
@@ -2362,11 +2373,11 @@ class FPGAWidget(QWidget):
         return row + 1
 
     def _add_host(self, grid: QGridLayout, row: int, name: str,
-                  on_set=None) -> int:
+                  on_set=None, readback_reg: str | None = None) -> int:
         """Add one host-param row to *grid*. Returns next row index.
 
-        on_set: optional callable — if given, a 'Set' button is added in col 2
-                that calls on_set() when clicked.
+        on_set      : optional callable — Set button added in col 2.
+        readback_reg: FPGA register whose live value is shown in gray in col 3.
         """
         hp = HOST_PARAM_MAP.get(name)
         if hp is None:
@@ -2382,6 +2393,13 @@ class FPGAWidget(QWidget):
             btn.setFixedWidth(40)
             btn.clicked.connect(on_set)
             grid.addWidget(btn, row, 2)
+        if readback_reg is not None:
+            lbl = QLabel("—")
+            lbl.setStyleSheet("color: #9ca3af; font-size: 10px; font-style: italic;")
+            lbl.setFixedWidth(90)
+            lbl.setToolTip("FPGA readback (Hz)")
+            self._host_coeff_labels[readback_reg] = lbl
+            grid.addWidget(lbl, row, 3)
         return row + 1
 
     # ==================================================================
@@ -2606,11 +2624,16 @@ class FPGAWidget(QWidget):
             is_writable = reg is not None and reg.access != Access.READ
             is_int = reg is not None and reg.is_integer
             if is_writable:
-                # Always refresh the grey live-value label
+                hz_str = coeff_to_hz(name, val)
+                display = hz_str if hz_str is not None else _fmt(val, is_int)
+                # Refresh the grey live-value label in the Computed Coefficients section
                 live_lbl = self._reg_live_labels.get(name)
                 if live_lbl is not None:
-                    hz_str = coeff_to_hz(name, val)
-                    live_lbl.setText(hz_str if hz_str is not None else _fmt(val, is_int))
+                    live_lbl.setText(display)
+                # Also refresh the readback label beside the filter Hz input field
+                host_lbl = self._host_coeff_labels.get(name)
+                if host_lbl is not None:
+                    host_lbl.setText(display)
                 # Only push into the editable field on startup / explicit read
                 if initial:
                     edit.setText(_fmt(val, is_int))
