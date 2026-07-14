@@ -51,6 +51,8 @@ fpga_session_log.jsonl
 fpga_snapshot_*.json
 ipc/*.json
 ipc/*.jsonl
+fpga/ipc/*.json
+fpga/ipc/*.jsonl
 
 # Waveform data files
 waveforms/
